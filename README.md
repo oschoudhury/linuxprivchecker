@@ -1,4 +1,4 @@
-# `linuxprivchecker.py` --- A Linux Privilege Escalation Checker for Python 3.7 and 3.x
+# `linuxprivchecker.py` --- A Linux Privilege Escalation Checker for Python 2.7 and 3.x
 
 ## Summary
 This script is intended to be executed locally on a Linux machine, with a Python version of 2.7 or 3.x, to enumerate basic system info and search for common privilege escalation vectors.
@@ -26,13 +26,13 @@ This script will try to check for if avenues along the following avenues:
 * `-h`, `--help`, should be self-explanatory.
 * `-c`, `--color` for using colors in a terminal environment for easier navigation through the output.
 * `-o filename`, `--outputfile filename` for storing the results in a local file.
-* `-s IP:port`, `--send IP:port` to extract the information to a different machine, preferably running `linuxprivserver.py`
+* `-s IP:port`, `--send IP:port` to exfiltrate the information to a different machine, preferably running `linuxprivserver.py`
 * `-q`, `--quiet` to not have the screen fill up with data. Useful in combination with `-o` and/or `-s`
 
 The `linuxprivchecker.py` will produce from anywhere between a few 100 lines of output and up to 100,000 lines or even more, depending on the situation. Interpretation of the output is left as an exercise for the reader.
 
-### The `linuxprivserver.py`, data extraction made easy
-`linuxprivchecker.py` can be used in combination with `linuxprivserver.py` to directly extract any gathered information to another machine. For this, run `linuxprivserver.py` on the receiving end and additionally you can provide the following options:
+### The `linuxprivserver.py`, data exfiltration made easy
+`linuxprivchecker.py` can be used in combination with `linuxprivserver.py` to directly exfiltration any gathered information to another machine. For this, run `linuxprivserver.py` on the receiving end and additionally you can provide the following options:
 * `--ip IP` to set up a specific listening IP address, defaults to all possible IP addresses
 * `--port PortNumber` to set up a port to listen on, defaults to 8080.
 * `--outfile Filename` to save the received output to a file.
