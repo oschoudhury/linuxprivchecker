@@ -13,7 +13,7 @@ except ImportError:
 quiet = False
 outfile = None
 
-__version__ = '1.0.0'
+__version__ = '2'
 
 
 class RequestHandler(BaseHTTPRequestHandler):

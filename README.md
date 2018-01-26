@@ -1,7 +1,7 @@
 # `linuxprivchecker.py` --- A Linux Privilege Escalation Checker for Python 2.7 and 3.x
 
 ## Summary
-This script is intended to be executed locally on a Linux machine, with a Python version of 2.7 or 3.x, to enumerate basic system info and search for common privilege escalation vectors.
+This script is intended to be executed locally on a Linux machine, with a Python version of 2.7 or 3.x, to enumerate basic system info and search for common privilege escalation vectors. Currently at version 2.
 
 ## Warning and Disclaimer
 This script comes as-is with no promise of functionality or accuracy. Only use this script after you understand what every line in the script does. Only run this script on machines you have permission to access, and where you have permission to access any account, files and folders for that particular machine. Check that you are compliant with the laws and regulations that apply in your place of residence, before attempting to run this script.
@@ -9,7 +9,7 @@ This script comes as-is with no promise of functionality or accuracy. Only use t
 This script is noisy by design and can therefore raise alarm bells. If you don't want this, don't run it.
 
 ## Usage
-This script will try to check for if avenues along the following avenues:
+This script will enumerate the following information for possible privilege escalation avenues:
 * Basic system information as kernel version, linux distribution and hostname.
 * Network information as IP addresses, routes, open connections and ARP caches.
 * Current mounts and entries in /etc/fstab
@@ -39,6 +39,15 @@ The `linuxprivchecker.py` will produce from anywhere between a few 100 lines of 
 * `--quiet` to not output anything on the screen, useful in combination with `--outfile`.
 Next run `linuxprivchecker.py` and make sure that `-s` is provided as argument with the correct IP and port information.
 
+An example would be to locally run:
+```
+python linuxprivserver.py --outfile priv_info.txt
+```
+and on the remote system to execute (assuming local IP is 192.168.1.100):
+```
+python linuxprivchecker.py -s 192.168.1.100:8080 -c -q
+```
+
 ### About colorized output
 The option `--color` in the `linuxprivchecker.py` script will propagate the terminal color commands to the output file and to the server (and any output file specified here). This means that when you open the file in an editor you might see some weird characters. This is left intentionally in place such that it is easier to browse through with commands as `less` and `cat`. If you want to remove the color formatting, run
 `cat colorized_output.txt > plain_output.txt`
@@ -48,6 +57,8 @@ or simply do not provide the `--color` option to `linuxprivchecker.py`.
 The `linuxprivchecker.py` cannot encode UTF-16 characters (yes, there is a rare case when a shell command issued by `linuxprivchecker.py` can contain output in `UTF-16` format). Some lines might therefore be missing in the output.
 
 ## Contribution
+List of contributors: imdos, brax.
+
 Compared to the original version, this script is refactored in a form that should make it easier to add additional commands.
 Feel free to raise an issue or even better (as I do not pretend to know every nook and cranny of Linux) make a pull request.
 
