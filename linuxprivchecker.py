@@ -81,7 +81,7 @@ def getSystemInfo():
     
 def getNetworkInfo():
     netInfo = OrderedDict()
-    netInfo["NETINFO"] = {"cmd": "/sbin/ifconfig -a",
+    netInfo["NETINFO"] = {"cmd": "if command -v ip 1>/dev/null; then ip addr show; else ifconfig; fi",
                           "msg": "Interfaces"}
     netInfo["ROUTE"] = {"cmd": "route",
                         "msg": "Route"}
