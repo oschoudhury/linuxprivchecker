@@ -144,6 +144,23 @@ def getUserInfo():
 
     return execCmd(userInfo)
 
+def interestingGroups(groups):
+    groupInfo = OrderedDict()
+    if 'sudo' in groups:
+        groupInfo['sudo'] = {"msg": "User belongs to the group: sudo",
+                             "results": ["Can be used for privilege escalation."]}
+    if 'adm' in groups:
+        groupInfo['adm'] = {"msg": "User belongs to group: adm",
+                            "results": ["Can view numerous log files/journalctl and perhaps perform some administrative tasks. Might I suggest to run:\nfind / -group adm -ls 2>/dev/null"]}
+    if 'docker' in groups:
+        groupInfo["docker"] = {"msg": "User belongs to group: docker",
+                               "results": ["Might be used for privilege escalation. Consider e.g. https://fosterelli.co/privilege-escalation-via-docker.html"]}
+    if 'lxd' in groups:
+        groupInfo["lxd"] = {"msg": "User belongs to group: lxd",
+                            "results": ["Consider e.g. https://reboare.github.io/lxd/lxd-escape.html"]}
+
+    return groupInfo
+
 def getFileDirInfo():
     fdPerms = OrderedDict()
     fdPerms["WWDIRSROOT"] = {"cmd": "find / \( -wholename '/home/homedir*' -prune \) -o \( -type d -perm -0002 \) -ls 2>/dev/null | grep root",
@@ -246,20 +263,16 @@ def rootProcesses(procs, pkgs, supusers):
 
     return result
 
-def getDockerInfo():
-    dockerApp = OrderedDict()
-    dockerApp["DockerVersion"] = {"cmd": "docker --version 2>/dev/null",
-                                  "msg": "Is docker available"}
-    dockerApp["DockerInside"] = {"cmd": "cat /proc/self/cgroup | grep 'docker' && ls -l /.dockerenv 2>/dev/null",
-                                 "msg": "Are we inside a docker container?"}
-    dockerApp["DockerOutside"] = {"cmd": "id | grep 'docker'",
-                                  "msg": "Part of docker group, might be used for privilege escalation"}
-    dockerApp["LXCInside"] = {"cmd": "grep -qa container=lxc /proc/1/environ 2>/dev/null",
-                              "msg": "Are we inside a lxc container (privileged)?"}
-    dockerApp["LXDOutside"] = {"cmd": "id | grep lxd",
-                               "msg": "Part of docker group, might be used for privilege escalation"}
+def getContainerInfo():
+    containerInfo = OrderedDict()
+    containerInfo["DockerVersion"] = {"cmd": "docker --version 2>/dev/null",
+                                      "msg": "Is docker available"}
+    containerInfo["DockerInside"] = {"cmd": "cat /proc/self/cgroup | grep 'docker' && ls -l /.dockerenv 2>/dev/null",
+                                     "msg": "Are we inside a docker container?"}
+    containerInfo["LXCInside"] = {"cmd": "grep -qa container=lxc /proc/1/environ 2>/dev/null",
+                                  "msg": "Are we inside a lxc container (privileged)?"}
 
-    return execCmd(dockerApp)
+    return execCmd(containerInfo)
     
 # EXPLOIT ENUMERATION
 def exploitEnum():
@@ -302,8 +315,10 @@ def main(args):
     printFormatResult(sysInfo, outputs, True)
 
     userInfo = getUserInfo()
+    groupInfo = interestingGroups(userInfo["ID"]["results"][0])
     printColour("\n\n\n[*] ENUMERATING USER AND ENVIRONMENTAL INFO...\n", outputs, RED)
     printFormatResult(userInfo, outputs, True)
+    printFormatResult(groupInfo, outputs, True)
 
     netInfo = getNetworkInfo()
     printColour("\n\n\n[*] GETTING NETWORKING INFO...\n", outputs, RED)
@@ -345,7 +360,7 @@ def main(args):
     #  printColour("\n\n\n[*] IDENTIFYING PROCESSES AND PACKAGES RUNNING AS ROOT OR OTHER SUPERUSER...\n", outputs, RED)
     #  printColour(rootPsInfo, outputs)
 
-    dockerInfo = getDockerInfo()
+    containerInfo = getContainerInfo()
     printColour("\n\n\n[*] GETTING LXC/DOCKER INFO...\n", outputs, RED)
     printFormatResult(dockerInfo, outputs, True)
 
