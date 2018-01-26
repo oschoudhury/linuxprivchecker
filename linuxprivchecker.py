@@ -114,8 +114,8 @@ def getSystemdInfo():
     systemdInfo = OrderedDict()
     systemdInfo["systemctl timers"] = {"cmd": "systemctl list-timers",
                                        "msg": "systemd scheduled tasks"}
-    systemdInfo["journalctl"] = {"cmd": "journalctl -n 50",
-                                 "msg": "Last lines in journalctl (privileged to adm)"}
+    systemdInfo["journalctl"] = {"cmd": "journalctl -n 100",
+                                 "msg": "Last 100 lines in journalctl (privileged to adm)"}
 
     return execCmd(systemdInfo)
     
@@ -141,6 +141,8 @@ def getUserInfo():
                            "msg": "Allowed sudo commands"}
     userInfo["LOGGEDIN"] = {"cmd": "w 2>/dev/null",
                             "msg": "Logged in User Activity"}
+    userInfo["FILESOUTSIDEHOME"] = {"cmd": "find / -path $( getent passwd \"$USER\" | cut -d: -f6 ) -prune -o -path /proc -prune -o -user \"$USER\" -ls 2>/dev/null",
+                                    "msg": "Files owned by current user outside the home-folder"}
 
     return execCmd(userInfo)
 
@@ -362,7 +364,7 @@ def main(args):
 
     containerInfo = getContainerInfo()
     printColour("\n\n\n[*] GETTING LXC/DOCKER INFO...\n", outputs, RED)
-    printFormatResult(dockerInfo, outputs, True)
+    printFormatResult(containerInfo, outputs, True)
 
     exploitTools = exploitEnum()
     printColour("\n\n\n[*] ENUMERATING INSTALLED LANGUAGES/TOOLS FOR SPLOIT BUILDING...\n", outputs, RED)
