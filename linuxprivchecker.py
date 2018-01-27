@@ -13,7 +13,7 @@ except ImportError:
     from urllib.request import Request, urlopen
     from urllib.parse import urlencode
 
-__version__ = '2'
+__version__ = '3'
 
 
 class HTTPUpload(object):

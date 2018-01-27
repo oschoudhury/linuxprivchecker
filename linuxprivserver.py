@@ -13,7 +13,7 @@ except ImportError:
 quiet = False
 outfile = None
 
-__version__ = '2'
+__version__ = '3'
 
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -53,7 +53,7 @@ def main(ip, port, filename=None, q=False):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--ip', dest='ip', required=False, default='0.0.0.0', help='If not provided, defaults to 0.0.0.0 (all interfaces)')
-    parser.add_argument('--port', dest='port', required=False, default=8080, help='If not provided, defaults to 8080')
+    parser.add_argument('--port', dest='port', required=False, default=8080, type=int, help='If not provided, defaults to 8080')
     parser.add_argument('--quiet', dest='quiet', required=False, default=False, action='store_true', help='Don\'t output results to the terminal')
     parser.add_argument('--outfile', dest='filename', required=False, default=None, help='Save the output to a file, not implemented yet')
     args = parser.parse_args()
