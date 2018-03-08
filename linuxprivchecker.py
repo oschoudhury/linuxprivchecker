@@ -36,6 +36,7 @@ smlline = "---------------------------------------------------------------------
 
 BLACK, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE = range(8)
 
+
 def printColour(text, streams, colour=None):
     try:
         if colour != -1 and colour is not None:
@@ -46,6 +47,7 @@ def printColour(text, streams, colour=None):
         # This exception gets raised when UTF-16 is part of the input
         pass
 
+
 # loop through dictionary, execute the commands, store the results, return updated dict
 def execCmd(cmdDict):
     for item in cmdDict:
@@ -54,6 +56,7 @@ def execCmd(cmdDict):
         results = out.decode('utf-8').splitlines()
         cmdDict[item]["results"] = results
     return cmdDict
+
 
 # print results for each previously executed command, no return value
 def printFormatResult(cmdDict, streams, color=None):
@@ -68,6 +71,7 @@ def printFormatResult(cmdDict, streams, color=None):
         printColour("", streams, color)
     return
 
+
 def getSystemInfo():
     sysInfo = OrderedDict()
     sysInfo["OS"] = {"cmd": "cat /etc/issue",
@@ -78,7 +82,8 @@ def getSystemInfo():
                            "msg": "Hostname"}
 
     return execCmd(sysInfo)
-    
+
+
 def getNetworkInfo():
     netInfo = OrderedDict()
     netInfo["NETINFO"] = {"cmd": "if command -v ip 1>/dev/null; then ip addr show; else ifconfig; fi",
@@ -91,7 +96,8 @@ def getNetworkInfo():
                       "msg": "Arp cache"}
 
     return execCmd(netInfo)
-    
+
+
 def getFileSystemInfo():
     driveInfo = OrderedDict()
     driveInfo["MOUNT"] = {"cmd": "mount",
@@ -100,7 +106,8 @@ def getFileSystemInfo():
                           "msg": "fstab entries"}
 
     return execCmd(driveInfo)
-    
+
+
 def getCronJobs():
     cronInfo = OrderedDict()
     cronInfo["CRON"] = {"cmd": "ls -la /etc/cron* 2>/dev/null",
@@ -110,6 +117,7 @@ def getCronJobs():
 
     return execCmd(cronInfo)
 
+
 def getSystemdInfo():
     systemdInfo = OrderedDict()
     systemdInfo["systemctl timers"] = {"cmd": "systemctl list-timers",
@@ -118,7 +126,8 @@ def getSystemdInfo():
                                  "msg": "Last 100 lines in journalctl (privileged to adm)"}
 
     return execCmd(systemdInfo)
-    
+
+
 def getUserInfo():
     userInfo = OrderedDict()
     userInfo["WHOAMI"] = {"cmd": "whoami",
@@ -146,6 +155,7 @@ def getUserInfo():
 
     return execCmd(userInfo)
 
+
 def interestingGroups(groups):
     groupInfo = OrderedDict()
     if 'sudo' in groups:
@@ -163,6 +173,7 @@ def interestingGroups(groups):
 
     return groupInfo
 
+
 def getFileDirInfo():
     fdPerms = OrderedDict()
     fdPerms["WWDIRSROOT"] = {"cmd": "find / \( -wholename '/home/homedir*' -prune \) -o \( -type d -perm -0002 \) -ls 2>/dev/null | grep root",
@@ -178,7 +189,7 @@ def getFileDirInfo():
     fdPerms["ROOTHOME"] = {"cmd": "ls -ahl /root 2>/dev/null",
                            "msg": "Checking if root's home folder is accessible"}
 
-    return execCmd(fdPerms)   
+    return execCmd(fdPerms)
 
 
 def getPwFileInfo():
@@ -192,12 +203,13 @@ def getPwFileInfo():
 
     return execCmd(pwFiles)
 
+
 def getMail():
     mailFiles = OrderedDict({"MAIL": {"cmd": "ls -la /var/mail 2>/dev/null",
                              "msg": "Any mail that can be read."}})
 
     return execCmd(mailFiles)
-    
+
 
 def processesAppsInfo(sysInfo):
     if "debian" in sysInfo["KERNEL"]["results"][0].lower() or "ubuntu" in sysInfo["KERNEL"]["results"][0].lower():
@@ -206,7 +218,7 @@ def processesAppsInfo(sysInfo):
         getPkgs = "pacman -Qe"
     else:
         getPkgs = "rpm -qa | sort -u" # RH/other
-    
+
     getAppProc = OrderedDict()
     getAppProc["PROCS"] = {"cmd": "ps aux | awk '{print $1,$2,$9,$10,$11}'",
                            "msg": "Current processes"}
@@ -216,7 +228,8 @@ def processesAppsInfo(sysInfo):
                           "msg": "configuration files inside /etc"}
 
     return execCmd(getAppProc)
-    
+
+
 def moreApps():
     otherApps = OrderedDict()
     otherApps["SUDO"] = {"cmd": "sudo -V | grep version 2>/dev/null",
@@ -227,13 +240,14 @@ def moreApps():
                                "msg":"Apache Config File"}
 
     return execCmd(otherApps)
-    
+
+
 def rootProcesses(procs, pkgs, supusers):
     procdict = OrderedDict() # dictionary to hold the processes running as super users
     # find the package information for the processes currently running
     # under root or another super user
     for proc in procs: # loop through each process
-        relatedpkgs = [] # list to hold the packages related to a process    
+        relatedpkgs = [] # list to hold the packages related to a process
         try:
             for user in supusers: # loop through the known super users
                 if (user != "") and (user in proc): # if the process is being run by a super user
@@ -265,6 +279,7 @@ def rootProcesses(procs, pkgs, supusers):
 
     return result
 
+
 def getContainerInfo():
     containerInfo = OrderedDict()
     containerInfo["DockerVersion"] = {"cmd": "docker --version 2>/dev/null",
@@ -275,7 +290,8 @@ def getContainerInfo():
                                   "msg": "Are we inside a lxc container (privileged)?"}
 
     return execCmd(containerInfo)
-    
+
+
 # EXPLOIT ENUMERATION
 def exploitEnum():
     devTools = OrderedDict()
@@ -283,7 +299,8 @@ def exploitEnum():
                          "msg": "Installed Tools"}
 
     return execCmd(devTools)
-    
+
+
 def main(args):
     if args.outputfile:
         try:
@@ -297,7 +314,7 @@ def main(args):
             sys.exit(1)
     else:
         args.outputfile = False
-    
+
     if args.sendhttp:
         ip, port = args.sendhttp.split(':')
         upload = HTTPUpload(ip, port)
@@ -306,7 +323,7 @@ def main(args):
     if not args.quiet: outputs.append(sys.stdout)
     if args.outputfile: outputs.append(outfile)
     if args.sendhttp: outputs.append(upload)
-    
+
     printColour(bigline, outputs, GREEN)
     printColour("\n     The Linux privilege escalation checker\n", outputs, GREEN)
     printColour(bigline, outputs, GREEN)
@@ -325,7 +342,7 @@ def main(args):
     netInfo = getNetworkInfo()
     printColour("\n\n\n[*] GETTING NETWORKING INFO...\n", outputs, RED)
     printFormatResult(netInfo, outputs, True)
-    
+
     fsInfo = getFileSystemInfo()
     printColour("\n\n\n[*] GETTING FILESYSTEM INFO...\n", outputs, RED)
     printFormatResult(fsInfo, outputs, True)
@@ -386,6 +403,7 @@ def main(args):
 
     if args.outputfile:
         outfile.close()
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

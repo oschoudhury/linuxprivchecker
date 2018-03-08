@@ -42,6 +42,7 @@ class RequestHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
 
+
 def main(ip, port, filename=None, q=False):
     global quiet, outfile
     quiet = q
@@ -49,6 +50,7 @@ def main(ip, port, filename=None, q=False):
         outfile = open(filename, 'w')
     server = HTTPServer((args.ip, args.port), RequestHandler)
     server.serve_forever()
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
