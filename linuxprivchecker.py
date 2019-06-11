@@ -103,8 +103,8 @@ def execCmd(cmdDict):
             # Check if the binary exists in $PATH
             if which(cmd[0]) is None:
                 if 'altcmd' in cmdDict[item] and \
-                        which(cmdDict[item]['altcmd']) is not None:
-                    cmdDict[item]['cmd'] = cmdDict[item]['altcmd']
+                        which(cmdDict[item]['altcmd'][0]) is not None:
+                    cmd = cmdDict[item]['altcmd']
                 else:
                     continue
             try:
